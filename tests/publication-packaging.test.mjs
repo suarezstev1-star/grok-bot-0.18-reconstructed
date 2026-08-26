@@ -64,7 +64,12 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(rendererPatch, /Last used/);
   assert.match(rendererPatch, /Tracked activity/);
   assert.match(rendererPatch, /RRouterProviders\.filter/);
+  assert.match(rendererPatch, /function RRouterModel\(/);
+  assert.match(rendererPatch, /RRouterReasoningOptions/);
+  assert.match(rendererPatch, /supportsReasoning/);
+  assert.match(rendererPatch, /desktop\.agent\.setInferenceRouter\(m\)/);
   assert.match(preload, /getInferenceRouter: \(\) => edge\("getInferenceRouter"\)/);
+  assert.match(preload, /typeof request === "string" \? \{ provider: request \} : request/);
   assert.match(preload, /getBoxRuntime: \(\) => edge\("getBoxRuntime"\)/);
   assert.match(preload, /setBoxRuntime: \(mode: string\) => edge\("setBoxRuntime", \{ mode \}\)/);
   assert.match(mainEdge, /syncHostSettingsToBox\(\{ inferenceProvider: provider, routedModels \}\)/);

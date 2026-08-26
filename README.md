@@ -94,10 +94,11 @@ when their local clients are already authenticated. The application preserves
 streaming responses, thinking state, reactions, rich plugin mentions, and MCP
 tool execution across routed conversations.
 
-**Model selection.** Each routed provider records its own model choice, which is
-persisted in the local settings and synced to the box host alongside the
-provider preference. Codex additionally carries a reasoning-effort choice. The
-effective model is resolved by precedence:
+**Model selection.** Each routed provider records its own model choice, set from
+the **Model** field on the Router page, which is persisted in the local settings
+and synced to the box host alongside the provider preference. Codex additionally
+carries a reasoning-effort choice. Leaving the field blank falls back to the
+provider default. The effective model is resolved by precedence:
 
 1. an environment override (`SAND_CODEX_MODEL`, `SAND_OPENROUTER_MODEL`,
    `SAND_CLAUDE_MODEL`, and `SAND_CODEX_REASONING_EFFORT`);

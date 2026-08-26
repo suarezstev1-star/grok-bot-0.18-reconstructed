@@ -167,6 +167,10 @@ npm run package
 open "dist/Grok Bot 0.18 Reconstructed.app"
 ```
 
+To build and run locally in one step, use `bash scripts/mac-local-setup.sh`. For
+continuing this work in a local Claude Code session, see
+[docs/LOCAL_HANDOFF.md](docs/LOCAL_HANDOFF.md).
+
 `npm run bootstrap` first uses the Git LFS preservation copy of the pinned
 0.18.0 DMG. If that archive is absent, it falls back to the original public URL;
 `GROK_BOT_018_APP` can also point to an existing application copy. Bootstrap

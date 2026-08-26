@@ -94,6 +94,18 @@ when their local clients are already authenticated. The application preserves
 streaming responses, thinking state, reactions, rich plugin mentions, and MCP
 tool execution across routed conversations.
 
+**Model selection.** Each routed provider records its own model choice, which is
+persisted in the local settings and synced to the box host alongside the
+provider preference. Codex additionally carries a reasoning-effort choice. The
+effective model is resolved by precedence:
+
+1. an environment override (`SAND_CODEX_MODEL`, `SAND_OPENROUTER_MODEL`,
+   `SAND_CLAUDE_MODEL`, and `SAND_CODEX_REASONING_EFFORT`);
+2. the persisted per-provider Router selection;
+3. for Codex, the model and `model_reasoning_effort` from its `config.toml`; and
+4. the built-in default (`gpt-5.4` for Codex, `openai/gpt-5.2` for OpenRouter,
+   and the Claude Code CLI login default for Claude Code).
+
 **Usage & Billing** shows the locally recorded request and token totals for
 providers that return usage data. These figures are activity records, not an
 authoritative provider invoice.

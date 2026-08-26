@@ -89,8 +89,10 @@ Open **Settings → Router** to choose the backend used for new turns:
 | Codex | Existing local ChatGPT/Codex login | Direct Responses transport with Grok Bot tools |
 | OpenRouter | API key saved through the desktop secrets bridge | Grok Bot tool-execution loop |
 
-Cursor is the default. Claude Code and Codex do not require separate API keys
-when their local clients are already authenticated. The application preserves
+Claude Code is the default provider: a fresh install routes new turns through
+Claude Code's existing local sign-in. Claude Code and Codex do not require
+separate API keys when their local clients are already authenticated; switch to
+Cursor (or any other provider) at any time in Settings → Router. The application preserves
 streaming responses, thinking state, reactions, rich plugin mentions, and MCP
 tool execution across routed conversations.
 

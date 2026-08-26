@@ -8,7 +8,7 @@ rules.
 
 An unofficial, source-oriented **reconstruction of the Grok Bot 0.18.0 macOS
 Electron app**, plus an **Inference Router** that routes new turns to one of four
-providers: Cursor (default), Claude Code, Codex, and OpenRouter. The shipped,
+providers: Claude Code (default), Cursor, Codex, and OpenRouter. The shipped,
 checksum-pinned renderer is retained as the UI baseline; a narrow deterministic
 transform injects the reconstructed Router settings. See `README.md` and
 `docs/ARCHITECTURE.md` for the full picture.

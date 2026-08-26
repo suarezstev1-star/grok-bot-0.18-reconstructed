@@ -7,7 +7,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { jsonSchema, streamText, tool, type CoreMessage, type LanguageModelV1, type ToolSet } from "ai";
 
 import { BasePromptBuilder, BasePromptExecutor } from "../../../packages/chat-inference/base.js";
-import type { SandInferenceProvider } from "../../../shared/inference-router.js";
+import { DEFAULT_ROUTED_MAX_TOOL_STEPS, DEFAULT_ROUTED_PROVIDER_MODEL, isSandCodexReasoningEffort, sanitizeRoutedMaxToolSteps, sanitizeRoutedSystemPrompt, type SandCodexReasoningEffort, type SandInferenceProvider, type SandRoutedInferenceProvider } from "../../../shared/inference-router.js";
 import { resolveClaudeCodeCliPath } from "../../../shared/node/inference-router-local.js";
 import { getSandRootDir } from "../../host-paths.js";
 import { SandSettingsStore } from "../../../shared/node/settings/sand-settings-store.js";
@@ -28,8 +28,42 @@ const GROK_ROUTER_SYSTEM_PROMPT = [
   "Never ask for an API key for an already-connected plugin. Respond directly to the user in natural language after completing any necessary tool calls.",
 ].join("\n");
 
+function routedSettingsStore(): SandSettingsStore {
+  return new SandSettingsStore(join(getSandRootDir(), "settings.json"));
+}
+
 function recordRoutedUsage(provider: RoutedProvider, usage: UsageRecord): void {
-  new SandSettingsStore(join(getSandRootDir(), "settings.json")).recordInferenceUsage(provider, usage);
+  routedSettingsStore().recordInferenceUsage(provider, usage);
+}
+
+// The persisted per-provider model chosen in Settings → Router, or null when the
+// user has not overridden the provider default. Reads are best-effort: a missing
+// or unreadable settings file falls back to null so env/config/default win.
+function settingsRoutedModel(provider: SandRoutedInferenceProvider): string | null {
+  try { return routedSettingsStore().getRoutedProviderModel(provider).model; }
+  catch { return null; }
+}
+
+// Max tool-use steps per routed turn. Precedence: the SAND_ROUTED_MAX_TOOL_STEPS
+// env override, then the persisted Settings value, then the built-in default.
+function configuredMaxToolSteps(): number {
+  const fromEnv = process.env.SAND_ROUTED_MAX_TOOL_STEPS?.trim();
+  if (fromEnv != null && fromEnv.length > 0) { const parsed = sanitizeRoutedMaxToolSteps(Number(fromEnv)); if (parsed != null) return parsed; }
+  try { return routedSettingsStore().getRoutedMaxToolSteps(); }
+  catch { return DEFAULT_ROUTED_MAX_TOOL_STEPS; }
+}
+
+function settingsRoutedSystemPrompt(): string | null {
+  try { return routedSettingsStore().getRoutedSystemPrompt() ?? null; }
+  catch { return null; }
+}
+
+// The system prompt for a routed turn: the built-in Grok Bot persona, plus an
+// optional user addition. Precedence for the addition: the
+// SAND_ROUTED_SYSTEM_PROMPT env override, then the persisted Settings value.
+function configuredSystemPrompt(): string {
+  const extra = sanitizeRoutedSystemPrompt(process.env.SAND_ROUTED_SYSTEM_PROMPT?.trim() || settingsRoutedSystemPrompt());
+  return extra == null ? GROK_ROUTER_SYSTEM_PROMPT : `${GROK_ROUTER_SYSTEM_PROMPT}\n\nAdditional user instructions:\n${extra}`;
 }
 
 function persistedSecrets(): Record<string, string> {
@@ -53,7 +87,7 @@ function providerPrompt(messages: readonly ProviderMessage[]): string {
     const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
     return `${message.role.toUpperCase()}: ${content}`;
   }).join("\n\n");
-  return `${GROK_ROUTER_SYSTEM_PROMPT}\n\nContinue this Grok Bot conversation.\n\n${rendered}`;
+  return `${configuredSystemPrompt()}\n\nContinue this Grok Bot conversation.\n\n${rendered}`;
 }
 
 function deferred<T>() { return Promise.withResolvers<T>(); }
@@ -131,23 +165,43 @@ function codexAuthenticatedFetch(initial: CodexCredentials): typeof fetch {
   };
 }
 
-function configuredCodexModel(): string {
-  const selected = process.env.SAND_CODEX_MODEL?.trim();
-  if (selected) return selected;
+function readCodexConfigValue(key: string): string | undefined {
   try {
     const config = readFileSync(join(process.env.CODEX_HOME?.trim() || join(homedir(), ".codex"), "config.toml"), "utf8");
-    return /^\s*model\s*=\s*["']([^"']+)["']/m.exec(config)?.[1]?.trim() || "gpt-5.4";
-  } catch { return "gpt-5.4"; }
+    return new RegExp(`^\\s*${key}\\s*=\\s*["']([^"']+)["']`, "m").exec(config)?.[1]?.trim() || undefined;
+  } catch { return undefined; }
 }
 
-function configuredCodexReasoningEffort(): "minimal" | "low" | "medium" | "high" | "xhigh" | undefined {
-  const selected = process.env.SAND_CODEX_REASONING_EFFORT?.trim();
-  if (selected === "minimal" || selected === "low" || selected === "medium" || selected === "high" || selected === "xhigh") return selected;
-  try {
-    const config = readFileSync(join(process.env.CODEX_HOME?.trim() || join(homedir(), ".codex"), "config.toml"), "utf8");
-    const value = /^\s*model_reasoning_effort\s*=\s*["']([^"']+)["']/m.exec(config)?.[1]?.trim();
-    return value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh" ? value : undefined;
-  } catch { return undefined; }
+// Model precedence: the SAND_CODEX_MODEL env override, then the model chosen in
+// Settings → Router, then the Codex `config.toml`, then the built-in default.
+function configuredCodexModel(): string {
+  return process.env.SAND_CODEX_MODEL?.trim()
+    || settingsRoutedModel("codex")
+    || readCodexConfigValue("model")
+    || DEFAULT_ROUTED_PROVIDER_MODEL.codex
+    || "gpt-5.4";
+}
+
+function configuredCodexReasoningEffort(): SandCodexReasoningEffort | undefined {
+  const fromEnv = process.env.SAND_CODEX_REASONING_EFFORT?.trim();
+  if (isSandCodexReasoningEffort(fromEnv)) return fromEnv;
+  try { const stored = routedSettingsStore().getRoutedProviderModel("codex").reasoningEffort; if (stored != null) return stored; }
+  catch { /* fall through to config.toml */ }
+  const fromConfig = readCodexConfigValue("model_reasoning_effort");
+  return isSandCodexReasoningEffort(fromConfig) ? fromConfig : undefined;
+}
+
+// Model precedence: env override, then Settings → Router, then the built-in default.
+function configuredOpenRouterModel(): string {
+  return process.env.SAND_OPENROUTER_MODEL?.trim()
+    || settingsRoutedModel("openrouter")
+    || DEFAULT_ROUTED_PROVIDER_MODEL.openrouter
+    || "openai/gpt-5.2";
+}
+
+// A null result lets the Claude Code CLI use its own signed-in default model.
+function configuredClaudeModel(): string | undefined {
+  return process.env.SAND_CLAUDE_MODEL?.trim() || settingsRoutedModel("claude-code") || undefined;
 }
 
 function codexTools(definitions: readonly Loose[] | undefined): CodexDirectTool[] | undefined {
@@ -180,11 +234,11 @@ function codexExecutor(messages: readonly ProviderMessage[], invocationId: strin
         endpoint: "https://chatgpt.com/backend-api/codex/responses",
         model,
         ...(configuredCodexReasoningEffort() == null ? {} : { reasoningEffort: configuredCodexReasoningEffort()! }),
-        instructions: GROK_ROUTER_SYSTEM_PROMPT,
+        instructions: configuredSystemPrompt(),
         input: messages.map(message => ({ role: message.role === "assistant" ? "assistant" : "user", content: typeof message.content === "string" ? message.content : JSON.stringify(message.content) })),
         ...(tools == null ? {} : { tools }),
         ...(executeTool == null ? {} : { executeTool: async (selected, args, toolCallId) => await executeTool(selected.source, args, toolCallId) }),
-        maxSteps: tools == null ? 1 : 8,
+        maxSteps: tools == null ? 1 : configuredMaxToolSteps(),
       })) {
         if (event.type === "text-delta") { text += event.delta; yield { type: "text-delta" as const, textDelta: event.delta }; continue; }
         const basic = { promptTokens: event.usage.inputTokens, completionTokens: event.usage.outputTokens, totalTokens: event.usage.inputTokens + event.usage.outputTokens };
@@ -210,8 +264,8 @@ function claudeExecutor(messages: readonly ProviderMessage[], invocationId: stri
   const fullStream = (async function* () {
     try {
       let final: SDKResultMessage | undefined;
-      const selectedModel = process.env.SAND_CLAUDE_MODEL?.trim();
-      for await (const message of queryClaude({ prompt: providerPrompt(messages), options: { pathToClaudeCodeExecutable: executable, cwd: getSandRootDir(), tools: mcpServerUrl == null ? [] : ["mcp__grok_bot_plugins__*"], ...(mcpServerUrl == null ? {} : { mcpServers: { grok_bot_plugins: { type: "http" as const, url: mcpServerUrl } }, strictMcpConfig: true }), permissionMode: "default", maxTurns: mcpServerUrl == null ? 1 : 8, persistSession: false, ...(selectedModel == null || selectedModel.length === 0 ? {} : { model: selectedModel }) } })) if (message.type === "result") final = message;
+      const selectedModel = configuredClaudeModel();
+      for await (const message of queryClaude({ prompt: providerPrompt(messages), options: { pathToClaudeCodeExecutable: executable, cwd: getSandRootDir(), tools: mcpServerUrl == null ? [] : ["mcp__grok_bot_plugins__*"], ...(mcpServerUrl == null ? {} : { mcpServers: { grok_bot_plugins: { type: "http" as const, url: mcpServerUrl } }, strictMcpConfig: true }), permissionMode: "default", maxTurns: mcpServerUrl == null ? 1 : configuredMaxToolSteps(), persistSession: false, ...(selectedModel == null || selectedModel.length === 0 ? {} : { model: selectedModel }) } })) if (message.type === "result") final = message;
       if (final == null) throw new Error("Claude Code ended without a result.");
       if (final.subtype !== "success") throw new Error(final.errors.join("\n") || `Claude Code failed (${final.subtype}).`);
       const text = final.result;
@@ -245,10 +299,10 @@ function toToolSet(definitions: readonly Loose[] | undefined, executeTool?: Rout
 }
 
 function openRouterExecutor(messages: readonly ProviderMessage[], invocationId: string, definitions?: readonly Loose[], executeTool?: RoutedToolExecutor, onUsage?: (usage: UsageRecord) => void) {
-  const id = process.env.SAND_OPENROUTER_MODEL?.trim() || "openai/gpt-5.2";
+  const id = configuredOpenRouterModel();
   const model: LanguageModelV1 = createOpenAI({ apiKey: openRouterCredential(), baseURL: "https://openrouter.ai/api/v1", compatibility: "compatible", name: "openrouter", headers: { "HTTP-Referer": "https://github.com/grok-bot-reconstructed", "X-Title": "Grok Bot Reconstructed" } }).chat(id as any);
   const tools = toToolSet(definitions, executeTool);
-  const result = streamText({ model, system: GROK_ROUTER_SYSTEM_PROMPT, messages: messages as CoreMessage[], ...(tools === undefined ? {} : { tools }), toolCallStreaming: true, maxSteps: tools === undefined ? 1 : 8 });
+  const result = streamText({ model, system: configuredSystemPrompt(), messages: messages as CoreMessage[], ...(tools === undefined ? {} : { tools }), toolCallStreaming: true, maxSteps: tools === undefined ? 1 : configuredMaxToolSteps() });
   const extendedUsage = result.usage.then(value => ({ inputTokens: value.promptTokens, outputTokens: value.completionTokens, cacheReadTokens: 0, cacheWriteTokens: 0, maxTokens: 0 }));
   if (onUsage != null) void extendedUsage.then(onUsage);
   return { fullStream: result.fullStream, response: result.response, usage: result.usage, extendedUsage, providerMetadata: result.providerMetadata, invocationId: Promise.resolve(invocationId) };
@@ -264,7 +318,7 @@ class ProviderPromptExecutor extends BasePromptExecutor<ProviderMessage> {
 }
 
 export function createProviderPromptSession(provider: RoutedProvider): { getModelId(): string; getExecutor(state?: unknown): PromptExecutor } {
-  const modelId = provider === "codex" ? configuredCodexModel() : provider === "claude-code" ? "claude-code" : process.env.SAND_OPENROUTER_MODEL?.trim() || "openai/gpt-5.2";
+  const modelId = provider === "codex" ? configuredCodexModel() : provider === "claude-code" ? configuredClaudeModel() ?? "claude-code" : configuredOpenRouterModel();
   return { getModelId: () => modelId, getExecutor: state => new ProviderPromptExecutor(provider, Array.isArray(state) ? state as ProviderMessage[] : undefined, usage => recordRoutedUsage(provider, usage)) };
 }
 

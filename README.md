@@ -94,9 +94,38 @@ when their local clients are already authenticated. The application preserves
 streaming responses, thinking state, reactions, rich plugin mentions, and MCP
 tool execution across routed conversations.
 
+**Model selection.** Each routed provider records its own model choice, set from
+the **Model** field on the Router page, which is persisted in the local settings
+and synced to the box host alongside the provider preference. Codex additionally
+carries a reasoning-effort choice. Leaving the field blank falls back to the
+provider default. The effective model is resolved by precedence:
+
+1. an environment override (`SAND_CODEX_MODEL`, `SAND_OPENROUTER_MODEL`,
+   `SAND_CLAUDE_MODEL`, and `SAND_CODEX_REASONING_EFFORT`);
+2. the persisted per-provider Router selection;
+3. for Codex, the model and `model_reasoning_effort` from its `config.toml`; and
+4. the built-in default (`gpt-5.4` for Codex, `openai/gpt-5.2` for OpenRouter,
+   and the Claude Code CLI login default for Claude Code).
+
+**Routed turn controls.** Two cross-provider knobs shape how a routed turn runs,
+independent of the model:
+
+- **Tool-step budget** — the maximum number of tool-use steps a single routed
+  turn may take before it must answer (bounded 1–50, default 8). Override with
+  `SAND_ROUTED_MAX_TOOL_STEPS`, or persist it in settings.
+- **Custom system prompt** — an optional addition to Grok Bot's built-in routed
+  persona, applied to Claude Code, Codex, and OpenRouter turns alike. Override
+  with `SAND_ROUTED_SYSTEM_PROMPT`, or persist it in settings; the built-in
+  persona is always kept and the addition is appended after it.
+
+Both follow the same precedence as model selection (environment override, then
+the persisted setting, then the built-in default) and are synced to the box host.
+
 **Usage & Billing** shows the locally recorded request and token totals for
 providers that return usage data. These figures are activity records, not an
-authoritative provider invoice.
+authoritative provider invoice. The recorded usage can be exported as JSON or
+CSV (per provider, annotated with the selected model and token totals) through
+the desktop bridge.
 
 ### Local Docker sandbox
 
@@ -137,6 +166,10 @@ npm run check
 npm run package
 open "dist/Grok Bot 0.18 Reconstructed.app"
 ```
+
+To build and run locally in one step, use `bash scripts/mac-local-setup.sh`. For
+continuing this work in a local Claude Code session, see
+[docs/LOCAL_HANDOFF.md](docs/LOCAL_HANDOFF.md).
 
 `npm run bootstrap` first uses the Git LFS preservation copy of the pinned
 0.18.0 DMG. If that archive is absent, it falls back to the original public URL;

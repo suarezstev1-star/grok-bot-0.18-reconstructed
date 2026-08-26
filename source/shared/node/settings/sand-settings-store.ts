@@ -10,6 +10,7 @@ import { SidebarSections, type SidebarSection } from "../../sidebar-sections.js"
 import { coerceToEnabledTrack, isSandUpdateTrack, type SandUpdateTrack } from "../../update-track.js";
 import { isSandAgentModelSelection, type SandAgentModelSelection } from "../../agents/sand-agent-model.js";
 import { emptySandInferenceRouterUsage, isSandInferenceProvider, type SandInferenceProvider, type SandInferenceRouterUsage } from "../../inference-router.js";
+import { emptySandRoutedModelConfig, parseSandRoutedModelConfig, sandRoutedModelConfigHasSelection, sanitizeRoutedModelId, DEFAULT_ROUTED_MAX_TOOL_STEPS, sanitizeRoutedMaxToolSteps, sanitizeRoutedSystemPrompt, type SandCodexReasoningEffort, type SandRoutedInferenceProvider, type SandRoutedModelConfig, type SandRoutedProviderModelConfig } from "../../inference-router.js";
 import { DEFAULT_SAND_BOX_RUNTIME, isSandBoxRuntime, type SandBoxRuntime } from "../../box-runtime.js";
 
 export const SETTINGS_VERSION = 1;
@@ -26,7 +27,8 @@ export interface SandStoredSettings {
   agentDefaultModel?: SandAgentModelSelection; computerUseModel?: SandAgentModelSelection; notifications?: Record<string, unknown>;
   userTimeZone?: string; userTimeZoneOverride?: string; autoReviewInstructions?: SandAutoReviewInstructions;
   localToolPermission?: SandLocalToolPermission; localToolPermissionCeiling?: SandLocalToolPermission;
-  inferenceProvider?: SandInferenceProvider; inferenceRouterUsage?: SandInferenceRouterUsage;
+  inferenceProvider?: SandInferenceProvider; inferenceRouterUsage?: SandInferenceRouterUsage; routedModels?: SandRoutedModelConfig;
+  routedMaxToolSteps?: number; routedSystemPrompt?: string;
   boxRuntime?: SandBoxRuntime;
   mcpCustomInstructionsAccountScope?: string; pinnedAgentIds?: string[]; sidebarSections?: SidebarSection[];
 }
@@ -85,6 +87,12 @@ function parseSettings(value: unknown): SandStoredSettings | null {
     }
     result.inferenceRouterUsage = usage;
   }
+  if (typeof raw.routedModels === "object" && raw.routedModels != null && !Array.isArray(raw.routedModels)) {
+    const routedModels = parseSandRoutedModelConfig(raw.routedModels);
+    if (sandRoutedModelConfigHasSelection(routedModels)) result.routedModels = routedModels;
+  }
+  { const steps = sanitizeRoutedMaxToolSteps(raw.routedMaxToolSteps); if (steps != null) result.routedMaxToolSteps = steps; }
+  { const prompt = sanitizeRoutedSystemPrompt(raw.routedSystemPrompt); if (prompt != null) result.routedSystemPrompt = prompt; }
   if (Array.isArray(raw.pinnedAgentIds)) result.pinnedAgentIds = [...new Set(stringArray(raw.pinnedAgentIds).filter((id) => id.length > 0))];
   if (Array.isArray(raw.sidebarSections)) result.sidebarSections = SidebarSections.carryFolds({ sections: raw.sidebarSections.filter((entry): entry is SidebarSection => typeof entry === "object" && entry != null && typeof (entry as { id?: unknown }).id === "string" && typeof (entry as { name?: unknown }).name === "string" && Array.isArray((entry as { agentIds?: unknown }).agentIds)) });
   return result;
@@ -166,6 +174,29 @@ export class SandSettingsStore {
       return { ...settings, inferenceRouterUsage: { schemaVersion: 1, providers: { ...current.providers, [provider]: { requests: previous.requests + 1, inputTokens: previous.inputTokens + safe(usage.inputTokens), outputTokens: previous.outputTokens + safe(usage.outputTokens), cacheReadTokens: previous.cacheReadTokens + safe(usage.cacheReadTokens), cacheWriteTokens: previous.cacheWriteTokens + safe(usage.cacheWriteTokens), lastUsedAt: new Date().toISOString() } } } };
     });
   }
+  getRoutedModelConfig(): SandRoutedModelConfig { return this.load().routedModels ?? emptySandRoutedModelConfig(); }
+  getRoutedProviderModel(provider: SandRoutedInferenceProvider): SandRoutedProviderModelConfig { return this.getRoutedModelConfig().providers[provider]; }
+  setRoutedModelConfig(config: SandRoutedModelConfig): void {
+    this.update((s) => {
+      const { routedModels: _old, ...rest } = s;
+      return sandRoutedModelConfigHasSelection(config) ? { ...rest, routedModels: config } : rest;
+    });
+  }
+  setRoutedProviderModel(provider: SandRoutedInferenceProvider, value: { model?: string | null; reasoningEffort?: SandCodexReasoningEffort | null }): void {
+    this.update((s) => {
+      const current = s.routedModels ?? emptySandRoutedModelConfig();
+      const previous = current.providers[provider];
+      const nextModel = value.model === undefined ? previous.model : sanitizeRoutedModelId(value.model);
+      const nextReasoning = provider === "codex" ? (value.reasoningEffort === undefined ? previous.reasoningEffort : value.reasoningEffort) : null;
+      const next: SandRoutedModelConfig = { schemaVersion: 1, providers: { ...current.providers, [provider]: { model: nextModel, reasoningEffort: nextReasoning } } };
+      const { routedModels: _old, ...rest } = s;
+      return sandRoutedModelConfigHasSelection(next) ? { ...rest, routedModels: next } : rest;
+    });
+  }
+  getRoutedMaxToolSteps(): number { return this.load().routedMaxToolSteps ?? DEFAULT_ROUTED_MAX_TOOL_STEPS; }
+  setRoutedMaxToolSteps(value?: number): void { this.update((s) => { if (value === undefined) { const { routedMaxToolSteps: _old, ...rest } = s; return rest; } const next = sanitizeRoutedMaxToolSteps(value); return next == null ? s : { ...s, routedMaxToolSteps: next }; }); }
+  getRoutedSystemPrompt(): string | undefined { return this.load().routedSystemPrompt; }
+  setRoutedSystemPrompt(value?: string): void { this.update((s) => { const { routedSystemPrompt: _old, ...rest } = s; const next = sanitizeRoutedSystemPrompt(value); return next == null ? rest : { ...rest, routedSystemPrompt: next }; }); }
   setLocalToolPermissionCeiling(value?: SandLocalToolPermission): void { this.update((s) => { const { localToolPermissionCeiling: _old, ...rest } = s; return value === undefined ? rest : { ...rest, localToolPermissionCeiling: value }; }); }
   getPinnedAgentIds(): string[] | undefined { return this.load().pinnedAgentIds; }
   setPinnedAgentIds(ids: readonly string[]): void { this.update((s) => ({ ...s, pinnedAgentIds: [...new Set(ids)] })); }

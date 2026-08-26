@@ -7,7 +7,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { jsonSchema, streamText, tool, type CoreMessage, type LanguageModelV1, type ToolSet } from "ai";
 
 import { BasePromptBuilder, BasePromptExecutor } from "../../../packages/chat-inference/base.js";
-import { DEFAULT_ROUTED_PROVIDER_MODEL, isSandCodexReasoningEffort, type SandCodexReasoningEffort, type SandInferenceProvider, type SandRoutedInferenceProvider } from "../../../shared/inference-router.js";
+import { DEFAULT_ROUTED_MAX_TOOL_STEPS, DEFAULT_ROUTED_PROVIDER_MODEL, isSandCodexReasoningEffort, sanitizeRoutedMaxToolSteps, sanitizeRoutedSystemPrompt, type SandCodexReasoningEffort, type SandInferenceProvider, type SandRoutedInferenceProvider } from "../../../shared/inference-router.js";
 import { resolveClaudeCodeCliPath } from "../../../shared/node/inference-router-local.js";
 import { getSandRootDir } from "../../host-paths.js";
 import { SandSettingsStore } from "../../../shared/node/settings/sand-settings-store.js";
@@ -44,6 +44,28 @@ function settingsRoutedModel(provider: SandRoutedInferenceProvider): string | nu
   catch { return null; }
 }
 
+// Max tool-use steps per routed turn. Precedence: the SAND_ROUTED_MAX_TOOL_STEPS
+// env override, then the persisted Settings value, then the built-in default.
+function configuredMaxToolSteps(): number {
+  const fromEnv = process.env.SAND_ROUTED_MAX_TOOL_STEPS?.trim();
+  if (fromEnv != null && fromEnv.length > 0) { const parsed = sanitizeRoutedMaxToolSteps(Number(fromEnv)); if (parsed != null) return parsed; }
+  try { return routedSettingsStore().getRoutedMaxToolSteps(); }
+  catch { return DEFAULT_ROUTED_MAX_TOOL_STEPS; }
+}
+
+function settingsRoutedSystemPrompt(): string | null {
+  try { return routedSettingsStore().getRoutedSystemPrompt() ?? null; }
+  catch { return null; }
+}
+
+// The system prompt for a routed turn: the built-in Grok Bot persona, plus an
+// optional user addition. Precedence for the addition: the
+// SAND_ROUTED_SYSTEM_PROMPT env override, then the persisted Settings value.
+function configuredSystemPrompt(): string {
+  const extra = sanitizeRoutedSystemPrompt(process.env.SAND_ROUTED_SYSTEM_PROMPT?.trim() || settingsRoutedSystemPrompt());
+  return extra == null ? GROK_ROUTER_SYSTEM_PROMPT : `${GROK_ROUTER_SYSTEM_PROMPT}\n\nAdditional user instructions:\n${extra}`;
+}
+
 function persistedSecrets(): Record<string, string> {
   try {
     const parsed = JSON.parse(readFileSync(getBoxSecretsStorePath(), "utf8")) as unknown;
@@ -65,7 +87,7 @@ function providerPrompt(messages: readonly ProviderMessage[]): string {
     const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
     return `${message.role.toUpperCase()}: ${content}`;
   }).join("\n\n");
-  return `${GROK_ROUTER_SYSTEM_PROMPT}\n\nContinue this Grok Bot conversation.\n\n${rendered}`;
+  return `${configuredSystemPrompt()}\n\nContinue this Grok Bot conversation.\n\n${rendered}`;
 }
 
 function deferred<T>() { return Promise.withResolvers<T>(); }
@@ -212,11 +234,11 @@ function codexExecutor(messages: readonly ProviderMessage[], invocationId: strin
         endpoint: "https://chatgpt.com/backend-api/codex/responses",
         model,
         ...(configuredCodexReasoningEffort() == null ? {} : { reasoningEffort: configuredCodexReasoningEffort()! }),
-        instructions: GROK_ROUTER_SYSTEM_PROMPT,
+        instructions: configuredSystemPrompt(),
         input: messages.map(message => ({ role: message.role === "assistant" ? "assistant" : "user", content: typeof message.content === "string" ? message.content : JSON.stringify(message.content) })),
         ...(tools == null ? {} : { tools }),
         ...(executeTool == null ? {} : { executeTool: async (selected, args, toolCallId) => await executeTool(selected.source, args, toolCallId) }),
-        maxSteps: tools == null ? 1 : 8,
+        maxSteps: tools == null ? 1 : configuredMaxToolSteps(),
       })) {
         if (event.type === "text-delta") { text += event.delta; yield { type: "text-delta" as const, textDelta: event.delta }; continue; }
         const basic = { promptTokens: event.usage.inputTokens, completionTokens: event.usage.outputTokens, totalTokens: event.usage.inputTokens + event.usage.outputTokens };
@@ -243,7 +265,7 @@ function claudeExecutor(messages: readonly ProviderMessage[], invocationId: stri
     try {
       let final: SDKResultMessage | undefined;
       const selectedModel = configuredClaudeModel();
-      for await (const message of queryClaude({ prompt: providerPrompt(messages), options: { pathToClaudeCodeExecutable: executable, cwd: getSandRootDir(), tools: mcpServerUrl == null ? [] : ["mcp__grok_bot_plugins__*"], ...(mcpServerUrl == null ? {} : { mcpServers: { grok_bot_plugins: { type: "http" as const, url: mcpServerUrl } }, strictMcpConfig: true }), permissionMode: "default", maxTurns: mcpServerUrl == null ? 1 : 8, persistSession: false, ...(selectedModel == null || selectedModel.length === 0 ? {} : { model: selectedModel }) } })) if (message.type === "result") final = message;
+      for await (const message of queryClaude({ prompt: providerPrompt(messages), options: { pathToClaudeCodeExecutable: executable, cwd: getSandRootDir(), tools: mcpServerUrl == null ? [] : ["mcp__grok_bot_plugins__*"], ...(mcpServerUrl == null ? {} : { mcpServers: { grok_bot_plugins: { type: "http" as const, url: mcpServerUrl } }, strictMcpConfig: true }), permissionMode: "default", maxTurns: mcpServerUrl == null ? 1 : configuredMaxToolSteps(), persistSession: false, ...(selectedModel == null || selectedModel.length === 0 ? {} : { model: selectedModel }) } })) if (message.type === "result") final = message;
       if (final == null) throw new Error("Claude Code ended without a result.");
       if (final.subtype !== "success") throw new Error(final.errors.join("\n") || `Claude Code failed (${final.subtype}).`);
       const text = final.result;
@@ -280,7 +302,7 @@ function openRouterExecutor(messages: readonly ProviderMessage[], invocationId: 
   const id = configuredOpenRouterModel();
   const model: LanguageModelV1 = createOpenAI({ apiKey: openRouterCredential(), baseURL: "https://openrouter.ai/api/v1", compatibility: "compatible", name: "openrouter", headers: { "HTTP-Referer": "https://github.com/grok-bot-reconstructed", "X-Title": "Grok Bot Reconstructed" } }).chat(id as any);
   const tools = toToolSet(definitions, executeTool);
-  const result = streamText({ model, system: GROK_ROUTER_SYSTEM_PROMPT, messages: messages as CoreMessage[], ...(tools === undefined ? {} : { tools }), toolCallStreaming: true, maxSteps: tools === undefined ? 1 : 8 });
+  const result = streamText({ model, system: configuredSystemPrompt(), messages: messages as CoreMessage[], ...(tools === undefined ? {} : { tools }), toolCallStreaming: true, maxSteps: tools === undefined ? 1 : configuredMaxToolSteps() });
   const extendedUsage = result.usage.then(value => ({ inputTokens: value.promptTokens, outputTokens: value.completionTokens, cacheReadTokens: 0, cacheWriteTokens: 0, maxTokens: 0 }));
   if (onUsage != null) void extendedUsage.then(onUsage);
   return { fullStream: result.fullStream, response: result.response, usage: result.usage, extendedUsage, providerMetadata: result.providerMetadata, invocationId: Promise.resolve(invocationId) };

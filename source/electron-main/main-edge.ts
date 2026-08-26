@@ -7,6 +7,7 @@ import { isValidIanaTimeZone } from "../shared/timezone.js";
 import { sandWebauthnProxyMirroredEnablement } from "../shared/webauthn-proxy-availability.js";
 import { reportDesktopEdgeFailure } from "./desktop-edge-failures.js";
 import { isSandCodexReasoningEffort, isSandInferenceProvider, isSandRoutedInferenceProvider } from "../shared/inference-router.js";
+import { formatRoutedUsageCsv, formatRoutedUsageJson } from "../shared/inference-usage-export.js";
 import { getLocalInferenceCliStatus } from "../shared/node/inference-router-local.js";
 import { isSandBoxRuntime } from "../shared/box-runtime.js";
 import { getLocalDockerStatus, startLocalDockerBox, stopLocalDockerBox } from "./box/local-docker-host-connector.js";
@@ -129,6 +130,17 @@ export function createMainEdgeHandlers(deps: MainEdgeDeps): HandlerMap {
       const settings = await deps.syncHostSettingsToBox({ inferenceProvider: provider, routedModels }).catch(() => null);
       return { provider, usage: settings?.inferenceRouterUsage ?? invoke(deps.settingsStore, "getInferenceRouterUsage") ?? null, models: settings?.routedModels ?? routedModels ?? null, local: getLocalInferenceCliStatus() };
     },
+    getRoutedBehavior: () => ({ maxToolSteps: invoke(deps.settingsStore, "getRoutedMaxToolSteps"), systemPrompt: invoke(deps.settingsStore, "getRoutedSystemPrompt") ?? null }),
+    setRoutedBehavior: async (raw) => {
+      const request = req(raw);
+      if ("maxToolSteps" in request) { const value = request.maxToolSteps; invoke(deps.settingsStore, "setRoutedMaxToolSteps", typeof value === "number" ? value : undefined); }
+      if ("systemPrompt" in request) { const value = request.systemPrompt; invoke(deps.settingsStore, "setRoutedSystemPrompt", typeof value === "string" ? value : undefined); }
+      const maxToolSteps = invoke(deps.settingsStore, "getRoutedMaxToolSteps");
+      const systemPrompt = invoke(deps.settingsStore, "getRoutedSystemPrompt") ?? null;
+      await deps.syncHostSettingsToBox({ routedMaxToolSteps: maxToolSteps, routedSystemPrompt: typeof systemPrompt === "string" ? systemPrompt : "" }).catch(() => null);
+      return { maxToolSteps, systemPrompt };
+    },
+    exportRoutedUsage: () => { const usage = invoke(deps.settingsStore, "getInferenceRouterUsage"); const models = invoke(deps.settingsStore, "getRoutedModelConfig"); return { json: formatRoutedUsageJson(usage as never, models as never), csv: formatRoutedUsageCsv(usage as never, models as never) }; },
     getBoxRuntime: async () => { const mode = invoke(deps.settingsStore, "getBoxRuntime"); invariant(isSandBoxRuntime(mode), "Unknown box runtime."); return { mode, status: await getLocalDockerStatus(String(Reflect.get(deps.settingsStore, "settingsPath"))) }; },
     setBoxRuntime: async (raw) => { const mode = req(raw).mode; invariant(isSandBoxRuntime(mode), "Unknown box runtime."); const settingsPath = String(Reflect.get(deps.settingsStore, "settingsPath")); invoke(deps.settingsStore, "setBoxRuntime", mode); try { if (mode === "local-docker") await startLocalDockerBox(settingsPath); else await stopLocalDockerBox(); } catch (error) { invoke(deps.settingsStore, "setBoxRuntime", mode === "local-docker" ? "remote" : "local-docker"); throw error; } invoke(deps.boxRecovery, "restartCoordinator"); return { mode, status: await getLocalDockerStatus(settingsPath) }; },
 

@@ -79,6 +79,15 @@ test("Router settings use the trusted backend and display recorded inference usa
   assert.match(mainEdge, /models: settings\.routedModels \?\? invoke\(deps\.settingsStore, "getRoutedModelConfig"\)/);
   assert.match(providers, /settingsRoutedModel\("codex"\)/);
   assert.match(providers, /configuredOpenRouterModel\(\)/);
+  assert.match(providers, /configuredMaxToolSteps\(\)/);
+  assert.match(providers, /configuredSystemPrompt\(\)/);
+  assert.doesNotMatch(providers, /maxSteps: tools == null \? 1 : 8/);
+  assert.match(mainEdge, /getRoutedBehavior:/);
+  assert.match(mainEdge, /setRoutedBehavior:/);
+  assert.match(mainEdge, /exportRoutedUsage:/);
+  assert.match(mainEdge, /routedMaxToolSteps: maxToolSteps, routedSystemPrompt:/);
+  assert.match(preload, /getRoutedBehavior: \(\) => edge\("getRoutedBehavior"\)/);
+  assert.match(preload, /exportRoutedUsage: \(\) => edge\("exportRoutedUsage"\)/);
   assert.match(mainEdge, /invoke\(deps\.boxRecovery, "restartCoordinator"\)/);
   assert.match(mainEdge, /mode === "local-docker"\) await startLocalDockerBox\(settingsPath\); else await stopLocalDockerBox\(\)/);
   assert.match(mainEdge, /setBoxRuntime", mode === "local-docker" \? "remote" : "local-docker"/);

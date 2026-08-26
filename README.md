@@ -107,9 +107,25 @@ provider default. The effective model is resolved by precedence:
 4. the built-in default (`gpt-5.4` for Codex, `openai/gpt-5.2` for OpenRouter,
    and the Claude Code CLI login default for Claude Code).
 
+**Routed turn controls.** Two cross-provider knobs shape how a routed turn runs,
+independent of the model:
+
+- **Tool-step budget** — the maximum number of tool-use steps a single routed
+  turn may take before it must answer (bounded 1–50, default 8). Override with
+  `SAND_ROUTED_MAX_TOOL_STEPS`, or persist it in settings.
+- **Custom system prompt** — an optional addition to Grok Bot's built-in routed
+  persona, applied to Claude Code, Codex, and OpenRouter turns alike. Override
+  with `SAND_ROUTED_SYSTEM_PROMPT`, or persist it in settings; the built-in
+  persona is always kept and the addition is appended after it.
+
+Both follow the same precedence as model selection (environment override, then
+the persisted setting, then the built-in default) and are synced to the box host.
+
 **Usage & Billing** shows the locally recorded request and token totals for
 providers that return usage data. These figures are activity records, not an
-authoritative provider invoice.
+authoritative provider invoice. The recorded usage can be exported as JSON or
+CSV (per provider, annotated with the selected model and token totals) through
+the desktop bridge.
 
 ### Local Docker sandbox
 

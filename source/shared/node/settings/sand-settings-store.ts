@@ -10,7 +10,7 @@ import { SidebarSections, type SidebarSection } from "../../sidebar-sections.js"
 import { coerceToEnabledTrack, isSandUpdateTrack, type SandUpdateTrack } from "../../update-track.js";
 import { isSandAgentModelSelection, type SandAgentModelSelection } from "../../agents/sand-agent-model.js";
 import { emptySandInferenceRouterUsage, isSandInferenceProvider, type SandInferenceProvider, type SandInferenceRouterUsage } from "../../inference-router.js";
-import { emptySandRoutedModelConfig, parseSandRoutedModelConfig, sandRoutedModelConfigHasSelection, sanitizeRoutedModelId, type SandCodexReasoningEffort, type SandRoutedInferenceProvider, type SandRoutedModelConfig, type SandRoutedProviderModelConfig } from "../../inference-router.js";
+import { emptySandRoutedModelConfig, parseSandRoutedModelConfig, sandRoutedModelConfigHasSelection, sanitizeRoutedModelId, DEFAULT_ROUTED_MAX_TOOL_STEPS, sanitizeRoutedMaxToolSteps, sanitizeRoutedSystemPrompt, type SandCodexReasoningEffort, type SandRoutedInferenceProvider, type SandRoutedModelConfig, type SandRoutedProviderModelConfig } from "../../inference-router.js";
 import { DEFAULT_SAND_BOX_RUNTIME, isSandBoxRuntime, type SandBoxRuntime } from "../../box-runtime.js";
 
 export const SETTINGS_VERSION = 1;
@@ -28,6 +28,7 @@ export interface SandStoredSettings {
   userTimeZone?: string; userTimeZoneOverride?: string; autoReviewInstructions?: SandAutoReviewInstructions;
   localToolPermission?: SandLocalToolPermission; localToolPermissionCeiling?: SandLocalToolPermission;
   inferenceProvider?: SandInferenceProvider; inferenceRouterUsage?: SandInferenceRouterUsage; routedModels?: SandRoutedModelConfig;
+  routedMaxToolSteps?: number; routedSystemPrompt?: string;
   boxRuntime?: SandBoxRuntime;
   mcpCustomInstructionsAccountScope?: string; pinnedAgentIds?: string[]; sidebarSections?: SidebarSection[];
 }
@@ -90,6 +91,8 @@ function parseSettings(value: unknown): SandStoredSettings | null {
     const routedModels = parseSandRoutedModelConfig(raw.routedModels);
     if (sandRoutedModelConfigHasSelection(routedModels)) result.routedModels = routedModels;
   }
+  { const steps = sanitizeRoutedMaxToolSteps(raw.routedMaxToolSteps); if (steps != null) result.routedMaxToolSteps = steps; }
+  { const prompt = sanitizeRoutedSystemPrompt(raw.routedSystemPrompt); if (prompt != null) result.routedSystemPrompt = prompt; }
   if (Array.isArray(raw.pinnedAgentIds)) result.pinnedAgentIds = [...new Set(stringArray(raw.pinnedAgentIds).filter((id) => id.length > 0))];
   if (Array.isArray(raw.sidebarSections)) result.sidebarSections = SidebarSections.carryFolds({ sections: raw.sidebarSections.filter((entry): entry is SidebarSection => typeof entry === "object" && entry != null && typeof (entry as { id?: unknown }).id === "string" && typeof (entry as { name?: unknown }).name === "string" && Array.isArray((entry as { agentIds?: unknown }).agentIds)) });
   return result;
@@ -190,6 +193,10 @@ export class SandSettingsStore {
       return sandRoutedModelConfigHasSelection(next) ? { ...rest, routedModels: next } : rest;
     });
   }
+  getRoutedMaxToolSteps(): number { return this.load().routedMaxToolSteps ?? DEFAULT_ROUTED_MAX_TOOL_STEPS; }
+  setRoutedMaxToolSteps(value?: number): void { this.update((s) => { if (value === undefined) { const { routedMaxToolSteps: _old, ...rest } = s; return rest; } const next = sanitizeRoutedMaxToolSteps(value); return next == null ? s : { ...s, routedMaxToolSteps: next }; }); }
+  getRoutedSystemPrompt(): string | undefined { return this.load().routedSystemPrompt; }
+  setRoutedSystemPrompt(value?: string): void { this.update((s) => { const { routedSystemPrompt: _old, ...rest } = s; const next = sanitizeRoutedSystemPrompt(value); return next == null ? rest : { ...rest, routedSystemPrompt: next }; }); }
   setLocalToolPermissionCeiling(value?: SandLocalToolPermission): void { this.update((s) => { const { localToolPermissionCeiling: _old, ...rest } = s; return value === undefined ? rest : { ...rest, localToolPermissionCeiling: value }; }); }
   getPinnedAgentIds(): string[] | undefined { return this.load().pinnedAgentIds; }
   setPinnedAgentIds(ids: readonly string[]): void { this.update((s) => ({ ...s, pinnedAgentIds: [...new Set(ids)] })); }

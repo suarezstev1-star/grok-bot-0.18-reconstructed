@@ -108,3 +108,40 @@ export function sandRoutedModelConfigHasSelection(config: SandRoutedModelConfig)
     return entry.model != null || entry.reasoningEffort != null;
   });
 }
+
+// --- Routed turn behavior -------------------------------------------------
+//
+// Cross-provider knobs that shape how a routed turn runs, independent of the
+// chosen model: how many tool-use steps a single turn may take, and an optional
+// user addition to the built-in system prompt.
+
+// The maximum number of tool-use steps a routed turn may take before it must
+// answer. Kept bounded so a runaway tool loop can never spin without limit.
+export const DEFAULT_ROUTED_MAX_TOOL_STEPS = 8;
+export const MIN_ROUTED_MAX_TOOL_STEPS = 1;
+export const MAX_ROUTED_MAX_TOOL_STEPS = 50;
+
+export function sanitizeRoutedMaxToolSteps(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  if (value < MIN_ROUTED_MAX_TOOL_STEPS || value > MAX_ROUTED_MAX_TOOL_STEPS) return null;
+  return value;
+}
+
+// An optional user addition to the built-in routed system prompt. Bounded, and
+// stripped of C0/C1 control characters (except tab and newline) so it can never
+// smuggle prompt- or protocol-breaking bytes into a provider request.
+export const MAX_ROUTED_SYSTEM_PROMPT_LENGTH = 4000;
+
+export function sanitizeRoutedSystemPrompt(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  let cleaned = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code === 0x09 || code === 0x0a) { cleaned += value[index]; continue; }
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) continue;
+    cleaned += value[index];
+  }
+  const trimmed = cleaned.trim();
+  if (trimmed.length === 0) return null;
+  return trimmed.length > MAX_ROUTED_SYSTEM_PROMPT_LENGTH ? trimmed.slice(0, MAX_ROUTED_SYSTEM_PROMPT_LENGTH) : trimmed;
+}

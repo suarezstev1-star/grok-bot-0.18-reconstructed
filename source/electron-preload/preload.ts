@@ -262,6 +262,9 @@ export function createDesktopPreloadBridge(options: {
       getAvailableModels: () => edge("getAvailableModels"),
       getInferenceRouter: () => edge("getInferenceRouter"),
       setInferenceRouter: (request: string | { provider: string; model?: string | null; reasoningEffort?: string | null }) => edge("setInferenceRouter", typeof request === "string" ? { provider: request } : request),
+      getRoutedBehavior: () => edge("getRoutedBehavior"),
+      setRoutedBehavior: (behavior: { maxToolSteps?: number | null; systemPrompt?: string | null }) => edge("setRoutedBehavior", behavior),
+      exportRoutedUsage: () => edge("exportRoutedUsage"),
       getBoxRuntime: () => edge("getBoxRuntime"),
       setBoxRuntime: (mode: string) => edge("setBoxRuntime", { mode }),
       clientPersistence: {

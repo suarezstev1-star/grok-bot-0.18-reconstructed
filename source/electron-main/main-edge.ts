@@ -6,7 +6,7 @@ import { isSandUpdateTrack } from "../shared/update-track.js";
 import { isValidIanaTimeZone } from "../shared/timezone.js";
 import { sandWebauthnProxyMirroredEnablement } from "../shared/webauthn-proxy-availability.js";
 import { reportDesktopEdgeFailure } from "./desktop-edge-failures.js";
-import { isSandCodexReasoningEffort, isSandInferenceProvider, isSandRoutedInferenceProvider } from "../shared/inference-router.js";
+import { DEFAULT_SAND_INFERENCE_PROVIDER, isSandCodexReasoningEffort, isSandInferenceProvider, isSandRoutedInferenceProvider } from "../shared/inference-router.js";
 import { formatRoutedUsageCsv, formatRoutedUsageJson } from "../shared/inference-usage-export.js";
 import { getLocalInferenceCliStatus } from "../shared/node/inference-router-local.js";
 import { isSandBoxRuntime } from "../shared/box-runtime.js";
@@ -113,7 +113,7 @@ export function createMainEdgeHandlers(deps: MainEdgeDeps): HandlerMap {
     getHostSidebarSections: async () => (await deps.readHostSettingsFromBox()).sidebarSections ?? null,
     setHostSidebarSections: (raw) => echo(deps, "sidebarSections", req(raw).sections, "sidebar sections"),
     getAvailableModels: () => deps.fetchAvailableModels(),
-    getInferenceRouter: async () => { const settings = await deps.readHostSettingsFromBox().catch(() => ({} as UnknownRecord)); const provider = invoke(deps.settingsStore, "getInferenceProvider"); return { provider: isSandInferenceProvider(provider) ? provider : "cursor", usage: settings.inferenceRouterUsage ?? invoke(deps.settingsStore, "getInferenceRouterUsage") ?? null, models: settings.routedModels ?? invoke(deps.settingsStore, "getRoutedModelConfig") ?? null, local: getLocalInferenceCliStatus() }; },
+    getInferenceRouter: async () => { const settings = await deps.readHostSettingsFromBox().catch(() => ({} as UnknownRecord)); const provider = invoke(deps.settingsStore, "getInferenceProvider"); return { provider: isSandInferenceProvider(provider) ? provider : DEFAULT_SAND_INFERENCE_PROVIDER, usage: settings.inferenceRouterUsage ?? invoke(deps.settingsStore, "getInferenceRouterUsage") ?? null, models: settings.routedModels ?? invoke(deps.settingsStore, "getRoutedModelConfig") ?? null, local: getLocalInferenceCliStatus() }; },
     setInferenceRouter: async (raw) => {
       const request = req(raw);
       const provider = request.provider;

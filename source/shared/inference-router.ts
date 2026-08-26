@@ -19,6 +19,11 @@ export function isSandInferenceProvider(value: unknown): value is SandInferenceP
   return typeof value === "string" && (SAND_INFERENCE_PROVIDERS as readonly string[]).includes(value);
 }
 
+// The provider a fresh install routes new turns through before the user picks
+// one in Settings → Router. Claude Code is the default so the app boots on the
+// routed Claude Code path rather than Cursor.
+export const DEFAULT_SAND_INFERENCE_PROVIDER: SandInferenceProvider = "claude-code";
+
 export function emptySandInferenceRouterUsage(): SandInferenceRouterUsage {
   const empty = (): SandInferenceRouterUsageProvider => ({ requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, lastUsedAt: null });
   return { schemaVersion: 1, providers: { cursor: empty(), "claude-code": empty(), codex: empty(), openrouter: empty() } };
